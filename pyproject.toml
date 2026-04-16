@@ -1,0 +1,94 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "fastapi-overflow"
+version = "0.1.0"
+description = "A small library to patch FastAPI to remove deadlock issues when using sync database sessions."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [
+    { name = "Oliver Margetts", email = "oliver.margetts@gmail.com" },
+]
+classifiers = [
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python",
+    "Topic :: Internet",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development",
+    "Typing :: Typed",
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: AsyncIO",
+    "Framework :: FastAPI",
+    "Framework :: Pydantic",
+    "Framework :: Pydantic :: 2",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Internet :: WWW/HTTP",
+]
+dependencies = [
+    "fastapi"
+]
+
+[project.urls]
+Homepage = "https://github.com/olliemath/fastapi-overflow"
+
+[project.optional-dependencies]
+dev = [
+    "ruff"
+]
+
+[[tool.mypy.overrides]]
+module = "fastapi.concurrency"
+warn_unused_ignores = false
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "fastapi.tests.*"
+ignore_missing_imports = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "docs_src.*"
+disallow_incomplete_defs = false
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+    "W191",  # indentation contains tabs
+]
+
+[tool.ruff.lint.isort]
+known-third-party = ["fastapi", "pydantic", "starlette"]
+
+[tool.ruff.lint.pyupgrade]
+# Preserve types, even if a file imports `from __future__ import annotations`.
+keep-runtime-typing = true
