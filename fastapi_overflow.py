@@ -58,7 +58,8 @@ async def _run_in_threadpool_with_overflow(
 
 async def iterate_in_threadpool(iterator: Iterable[_T]) -> AsyncIterator[_T]:
     async with _anti_deadlock_capacity_limiter:
-        return await _starlette_iterate_in_threadpool(iterator)  # type: ignore
+        async for item in _starlette_iterate_in_threadpool(iterator):
+            yield item
 
 
 def set_thread_limit(limit: int = 40, anti_deadlock_reserve: int = 1) -> None:
