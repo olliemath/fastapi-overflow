@@ -33,13 +33,20 @@ _T = TypeVar("_T")
 # for teardown tasks in order to prevent deadlocks when there is a pool
 # of finite resources (e.g. database connections) which threads will block
 # on trying to acquire.
-_anti_deadlock_capacity_limiter = CapacityLimiter(39)
+_anti_deadlock_capacity_limiter: CapacityLimiter | None = None
+
+
+def _get_anti_deadlock_capacity_limiter() -> CapacityLimiter:
+    global _anti_deadlock_capacity_limiter
+    if _anti_deadlock_capacity_limiter is None:
+        _anti_deadlock_capacity_limiter = CapacityLimiter(39)
+    return _anti_deadlock_capacity_limiter
 
 
 async def run_in_threadpool(
     func: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
 ) -> _T:
-    async with _anti_deadlock_capacity_limiter:
+    async with _get_anti_deadlock_capacity_limiter():
         return await _starlette_run_in_threadpool(func, *args, **kwargs)
 
 
@@ -57,7 +64,7 @@ async def _run_in_threadpool_with_overflow(
 
 
 async def iterate_in_threadpool(iterator: Iterable[_T]) -> AsyncIterator[_T]:
-    async with _anti_deadlock_capacity_limiter:
+    async with _get_anti_deadlock_capacity_limiter():
         async for item in _starlette_iterate_in_threadpool(iterator):
             yield item
 
@@ -82,7 +89,7 @@ def set_thread_limit(limit: int = 40, anti_deadlock_reserve: int = 1) -> None:
         raise ValueError("Anti deadlock reserve must be between 0 and limit - 1.")
 
     anyio.to_thread.current_default_thread_limiter().total_tokens = limit
-    _anti_deadlock_capacity_limiter.total_tokens = limit - anti_deadlock_reserve
+    _get_anti_deadlock_capacity_limiter().total_tokens = limit - anti_deadlock_reserve
 
 
 def patch() -> None:

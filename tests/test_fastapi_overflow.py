@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 import fastapi_overflow
-from fastapi_overflow import _anti_deadlock_capacity_limiter
+from fastapi_overflow import _get_anti_deadlock_capacity_limiter
 
 
 # Fire off 100 requests in parallel(ish) in order to create contention
@@ -35,7 +35,7 @@ def test_set_thread_limit():
     # This needs a running event loop to set/check the thread limit
     async def inner():
         fastapi_overflow.set_thread_limit(10, anti_deadlock_reserve=2)
-        assert _anti_deadlock_capacity_limiter.total_tokens == 8
+        assert _get_anti_deadlock_capacity_limiter().total_tokens == 8
         assert anyio.to_thread.current_default_thread_limiter().total_tokens == 10
 
     asyncio.run(inner())
@@ -56,3 +56,24 @@ def test_set_thread_limit_invalid_args(
 ):
     with pytest.raises(error_kind):
         fastapi_overflow.set_thread_limit(limit, anti_deadlock_reserve)
+
+
+def test_run_in_threadpool():
+    def blocking_function(x: int, y: int) -> int:
+        return x + y
+
+    async def inner():
+        result = await fastapi_overflow.run_in_threadpool(blocking_function, 1, y=2)
+        assert result == 3
+
+    asyncio.run(inner())
+
+
+def test_iterate_in_threadpool():
+    async def inner():
+        result = []
+        async for item in fastapi_overflow.iterate_in_threadpool(range(5)):
+            result.append(item)
+        assert result == [0, 1, 2, 3, 4]
+
+    asyncio.run(inner())
