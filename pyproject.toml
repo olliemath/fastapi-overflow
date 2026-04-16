@@ -56,6 +56,8 @@ dev = [
     "ruff",
 ]
 
+[tool.flit.sdist]
+exclude = ["tests/"]
 [[tool.mypy.overrides]]
 module = "fastapi.concurrency"
 warn_unused_ignores = false
