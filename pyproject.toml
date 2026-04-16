@@ -42,7 +42,7 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP",
 ]
 dependencies = [
-    "fastapi"
+    "fastapi >= 0.128.0"
 ]
 
 [project.urls]
@@ -50,7 +50,10 @@ Homepage = "https://github.com/olliemath/fastapi-overflow"
 
 [project.optional-dependencies]
 dev = [
-    "ruff"
+    "httpx",
+    "mypy",
+    "pytest",
+    "ruff",
 ]
 
 [[tool.mypy.overrides]]

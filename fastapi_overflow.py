@@ -27,7 +27,7 @@ from starlette.concurrency import (
 )
 from starlette.concurrency import run_in_threadpool as _starlette_run_in_threadpool
 
-_P = ParamSpec("P")
+_P = ParamSpec("_P")
 _T = TypeVar("_T")
 # The default threadpool in anyio is 40. This limiter keeps one thread
 # for teardown tasks in order to prevent deadlocks when there is a pool
@@ -37,21 +37,28 @@ _anti_deadlock_capacity_limiter = CapacityLimiter(39)
 
 
 async def run_in_threadpool(
-    func: Callable[_P, _T],
-    *args: _P.args,
-    _allow_anti_deadlock_overflow: bool = False,
-    **kwargs: _P.kwargs,
+    func: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
 ) -> _T:
-    if not _allow_anti_deadlock_overflow:
-        async with _anti_deadlock_capacity_limiter:
-            return await _starlette_run_in_threadpool(func, *args, **kwargs)
+    async with _anti_deadlock_capacity_limiter:
+        return await _starlette_run_in_threadpool(func, *args, **kwargs)
 
+
+# NOTE: a separate function is required only because mypy dislikes trying to add
+# a boolean flag along side the param spec
+async def _run_in_threadpool_with_overflow(
+    func: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
+) -> _T:
+    """Run a function in the thread pool, allowing it to use the overflow threads.
+
+    Unless you know what you are doing you probably do not want to use this function.
+    It has access to the entire thread pool, including the anti-deadlock reserve threads.
+    """
     return await _starlette_run_in_threadpool(func, *args, **kwargs)
 
 
 async def iterate_in_threadpool(iterator: Iterable[_T]) -> AsyncIterator[_T]:
     async with _anti_deadlock_capacity_limiter:
-        return await _starlette_iterate_in_threadpool(iterator)
+        return await _starlette_iterate_in_threadpool(iterator)  # type: ignore
 
 
 def set_thread_limit(limit: int = 40, anti_deadlock_reserve: int = 1) -> None:
@@ -80,9 +87,9 @@ def set_thread_limit(limit: int = 40, anti_deadlock_reserve: int = 1) -> None:
 def patch() -> None:
     """Patch both Starlette and FastAPI to use the anti-deadlock-aware thread pool."""
     fastapi.concurrency.run_in_threadpool = run_in_threadpool
-    fastapi.concurrency.iterate_in_threadpool = iterate_in_threadpool
+    fastapi.concurrency.iterate_in_threadpool = iterate_in_threadpool  # type: ignore
     fastapi.routing.run_in_threadpool = run_in_threadpool
-    fastapi.routing.iterate_in_threadpool = iterate_in_threadpool
+    fastapi.routing.iterate_in_threadpool = iterate_in_threadpool  # type: ignore
     fastapi.routing.serialize_response = _patched_serialize_response
     fastapi.dependencies.utils.run_in_threadpool = run_in_threadpool
 
@@ -114,12 +121,11 @@ async def _patched_serialize_response(
         if is_coroutine:
             value, errors = field.validate(response_content, {}, loc=("response",))
         else:
-            value, errors = await run_in_threadpool(
+            value, errors = await _run_in_threadpool_with_overflow(
                 field.validate,
                 response_content,
                 {},
                 loc=("response",),
-                _allow_anti_deadlock_overflow=True,
             )
         if errors:
             ctx = endpoint_ctx or EndpointContext()
