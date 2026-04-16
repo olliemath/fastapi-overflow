@@ -1,8 +1,8 @@
 # FastAPI Overflow
 
 When using FastAPI with a synchronous SQLAlchemy session dependency,
-as per the official example <...>, high loads can lead to temporary
-deadlocks, timeouts and poor performance.
+per the official example https://fastapi.tiangolo.com/tutorial/sql-databases/,
+high loads can lead to temporary deadlocks, timeouts and poor performance.
 
 This is a known issue, for which a PR is open. This library exists to allow users
 to easily patch the issue and run their code in the mean time.
