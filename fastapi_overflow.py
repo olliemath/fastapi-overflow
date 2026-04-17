@@ -1,8 +1,5 @@
-from collections.abc import (
-    AsyncIterator,
-    Callable,
-    Iterable,
-)
+import functools
+from collections.abc import Callable
 from contextlib import asynccontextmanager as asynccontextmanager
 from typing import (
     Any,
@@ -11,8 +8,6 @@ from typing import (
 )
 
 import anyio.to_thread
-import fastapi.concurrency
-import fastapi.dependencies.utils
 import fastapi.routing
 from anyio import CapacityLimiter
 from fastapi._compat import ModelField
@@ -22,84 +17,62 @@ from fastapi.exceptions import (
     ResponseValidationError,
 )
 from fastapi.types import IncEx
-from starlette.concurrency import (
-    iterate_in_threadpool as _starlette_iterate_in_threadpool,
-)
-from starlette.concurrency import run_in_threadpool as _starlette_run_in_threadpool
 
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
-# The default threadpool in anyio is 40. This limiter keeps one thread
-# for teardown tasks in order to prevent deadlocks when there is a pool
-# of finite resources (e.g. database connections) which threads will block
-# on trying to acquire.
-_anti_deadlock_capacity_limiter: CapacityLimiter | None = None
+# In order to avoid deadlocks, separate capacity limiters are needed for acquiring
+# and releasing threads. This limiter is used to ensure we always have some threads
+# releasing resources (like database connections) back to the pool.
+_release_capacity_limiter: CapacityLimiter | None = None
 
 
-def _get_anti_deadlock_capacity_limiter() -> CapacityLimiter:
-    global _anti_deadlock_capacity_limiter
-    if _anti_deadlock_capacity_limiter is None:
-        _anti_deadlock_capacity_limiter = CapacityLimiter(39)
-    return _anti_deadlock_capacity_limiter
-
-
-async def run_in_threadpool(
-    func: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
-) -> _T:
-    async with _get_anti_deadlock_capacity_limiter():
-        return await _starlette_run_in_threadpool(func, *args, **kwargs)
+def get_release_capacity_limiter() -> CapacityLimiter:
+    global _release_capacity_limiter
+    if _release_capacity_limiter is None:
+        _release_capacity_limiter = CapacityLimiter(5)
+    return _release_capacity_limiter
 
 
 # NOTE: a separate function is required only because mypy dislikes trying to add
 # a boolean flag along side the param spec
-async def _run_in_threadpool_with_overflow(
+async def run_in_release_threadpool(
     func: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
 ) -> _T:
-    """Run a function in the thread pool, allowing it to use the overflow threads.
+    """Run a function in the thread pool, allowing it to use the "release" threads.
 
     Unless you know what you are doing you probably do not want to use this function.
-    It has access to the entire thread pool, including the anti-deadlock reserve threads.
+    It has access to the capacity used exclusively for releasing resources, which is
+    separate from the main thread pool to avoid deadlocks.
     """
-    return await _starlette_run_in_threadpool(func, *args, **kwargs)
+    func = functools.partial(func, *args, **kwargs)
+    release_limiter = get_release_capacity_limiter()
+    return await anyio.to_thread.run_sync(func, limiter=release_limiter)
 
 
-async def iterate_in_threadpool(iterator: Iterable[_T]) -> AsyncIterator[_T]:
-    async with _get_anti_deadlock_capacity_limiter():
-        async for item in _starlette_iterate_in_threadpool(iterator):
-            yield item
-
-
-def set_thread_limit(limit: int = 40, anti_deadlock_reserve: int = 1) -> None:
+def set_thread_limit(default_limit: int = 40, release_limit: int = 5) -> None:
     """
     Set the maximum number of threads that can be used by the thread pool.
 
-    This is a global setting that affects all calls to `run_in_threadpool` and
-    `iterate_in_threadpool`.
+    The `default_limit` parameter controls the number of threads available for general use,
+    while the `release_limit` parameter controls the number of threads reserved for releasing
+    resources. These are separate to prevent deadlocks.
     """
-    if not isinstance(limit, int):
-        raise TypeError("Thread limit must be an integer.")
+    if not isinstance(default_limit, int):
+        raise TypeError("Default limit must be an integer.")
 
-    if not isinstance(anti_deadlock_reserve, int):
-        raise TypeError("Anti deadlock reserve must be an integer.")
+    if not isinstance(release_limit, int):
+        raise TypeError("Release limit must be an integer.")
 
-    if limit < 2:
-        raise ValueError("Thread limit must be at least 2.")
+    if default_limit < 1 or release_limit < 1:
+        raise ValueError("Thread limits must be at least 1.")
 
-    if not 0 < anti_deadlock_reserve < limit - 1:
-        raise ValueError("Anti deadlock reserve must be between 0 and limit - 1.")
-
-    anyio.to_thread.current_default_thread_limiter().total_tokens = limit
-    _get_anti_deadlock_capacity_limiter().total_tokens = limit - anti_deadlock_reserve
+    anyio.to_thread.current_default_thread_limiter().total_tokens = default_limit
+    get_release_capacity_limiter().total_tokens = release_limit
 
 
 def patch() -> None:
     """Patch both Starlette and FastAPI to use the anti-deadlock-aware thread pool."""
-    fastapi.concurrency.run_in_threadpool = run_in_threadpool
-    fastapi.concurrency.iterate_in_threadpool = iterate_in_threadpool  # type: ignore
-    fastapi.routing.run_in_threadpool = run_in_threadpool
-    fastapi.routing.iterate_in_threadpool = iterate_in_threadpool  # type: ignore
     fastapi.routing.serialize_response = _patched_serialize_response
-    fastapi.dependencies.utils.run_in_threadpool = run_in_threadpool
 
 
 # The below function has to be vendored from fastapi.routing and then patched back in,
@@ -129,7 +102,7 @@ async def _patched_serialize_response(
         if is_coroutine:
             value, errors = field.validate(response_content, {}, loc=("response",))
         else:
-            value, errors = await _run_in_threadpool_with_overflow(
+            value, errors = await run_in_release_threadpool(
                 field.validate,
                 response_content,
                 {},
@@ -157,4 +130,9 @@ async def _patched_serialize_response(
         return jsonable_encoder(response_content)
 
 
-__all__ = ["patch", "set_thread_limit", "run_in_threadpool", "iterate_in_threadpool"]
+__all__ = [
+    "patch",
+    "set_thread_limit",
+    "run_in_release_threadpool",
+    "get_release_capacity_limiter",
+]
