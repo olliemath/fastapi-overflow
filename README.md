@@ -14,10 +14,10 @@ We provide a single function to patch fastapi: `fastapi_overflow.patch()` should
 Use it like this:
 
 ```python
+import fastapi_overflow
 from fastapi import FastAPI
-from fastapi_overflow import patch
 
-patch()  # run this before starting your app
+fastapi_overflow.patch()  # run this before starting your app
 app = FastAPI()
 ```
 
