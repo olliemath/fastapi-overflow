@@ -7,6 +7,7 @@ import time
 from collections.abc import Iterator
 
 import pytest
+from anyio import CapacityLimiter
 from fastapi import Depends, FastAPI
 from pydantic import BaseModel
 
@@ -25,7 +26,7 @@ def patched_app() -> FastAPI:
     # Mutex, acting as our "connection pool" for a database for example
     mutex_pool = threading.Lock()
 
-    # Simulate releaasing a pooled resource in the teardown of a Depends,
+    # Simulate releasing a pooled resource in the teardown of a Depends,
     # which in reality is usually a database connection or similar.
     def release_resource() -> Iterator[None]:
         try:
@@ -44,3 +45,12 @@ def patched_app() -> FastAPI:
         return Item(name="foo", id=1)
 
     return app
+
+
+@pytest.fixture
+def release_capacity_limiter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset the release capacity limiter before/after tests to avoid interference
+    between different anyio backends."""
+    monkeypatch.setattr(
+        fastapi_overflow, "_release_capacity_limiter", CapacityLimiter(5)
+    )

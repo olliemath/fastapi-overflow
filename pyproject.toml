@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "fastapi-overflow"
-version = "0.1.5"
+version = "0.1.6"
 description = "A small library to patch FastAPI to remove deadlock issues when using sync database sessions."
 readme = "README.md"
 license = "MIT"
@@ -50,6 +50,7 @@ Homepage = "https://github.com/olliemath/fastapi-overflow"
 
 [project.optional-dependencies]
 dev = [
+    "anyio[trio]",
     "httpx",
     "mypy",
     "pytest",

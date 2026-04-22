@@ -3,9 +3,11 @@
 # Copyright (c) 2024 Noah Klein
 # Licensed under the MIT License
 import asyncio
+import time
 from typing import Any
 
 import anyio
+import fastapi.concurrency
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -30,14 +32,12 @@ def test_depends_deadlock_patch(patched_app: FastAPI):
     asyncio.run(run_requests())
 
 
-def test_set_thread_limit():
-    # This needs a running event loop to set/check the thread limit
-    async def inner():
-        fastapi_overflow.set_thread_limit(10, release_limit=2)
-        assert fastapi_overflow.get_release_capacity_limiter().total_tokens == 2
-        assert anyio.to_thread.current_default_thread_limiter().total_tokens == 10
-
-    asyncio.run(inner())
+@pytest.mark.anyio
+@pytest.mark.usefixtures("release_capacity_limiter")
+async def test_set_thread_limit():
+    fastapi_overflow.set_thread_limit(10, release_limit=2)
+    assert fastapi_overflow._release_capacity_limiter.total_tokens == 2
+    assert anyio.to_thread.current_default_thread_limiter().total_tokens == 10
 
 
 @pytest.mark.parametrize(
@@ -57,14 +57,42 @@ def test_set_thread_limit_invalid_args(
         fastapi_overflow.set_thread_limit(limit, release_limit)
 
 
-def test_run_in_release_threadpool():
+@pytest.mark.anyio
+@pytest.mark.usefixtures("release_capacity_limiter")
+async def test_run_in_release_threadpool():
     def blocking_function(x: int, y: int) -> int:
         return x + y
 
-    async def inner():
-        result = await fastapi_overflow.run_in_release_threadpool(
-            blocking_function, 1, y=2
-        )
-        assert result == 3
+    result = await fastapi_overflow.run_in_release_threadpool(blocking_function, 1, y=2)
+    assert result == 3
 
-    asyncio.run(inner())
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("release_capacity_limiter")
+async def test_competing_acquire_release() -> None:
+    """Check that the main threadpool does not block the release threadpool."""
+    pool_size = int(anyio.to_thread.current_default_thread_limiter().total_tokens)
+    acquirable = False
+    acquired: list[bool] = []
+
+    def acquire() -> None:
+        while not acquirable:
+            time.sleep(0.001)
+        acquired.append(True)
+
+    def release() -> None:
+        nonlocal acquirable
+        time.sleep(0.001)
+        acquirable = True
+
+    async with anyio.create_task_group() as tg:
+        for _ in range(pool_size):
+            tg.start_soon(fastapi.concurrency.run_in_threadpool, acquire)
+
+        await anyio.sleep(0.001)
+
+        # The threadpool should now be full of threads waiting to acquire
+        # The release function should be able to run without being blocked by acquires
+        await fastapi_overflow.run_in_release_threadpool(release)
+
+    assert len(acquired) == pool_size

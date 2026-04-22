@@ -23,14 +23,7 @@ _T = TypeVar("_T")
 # In order to avoid deadlocks, separate capacity limiters are needed for acquiring
 # and releasing threads. This limiter is used to ensure we always have some threads
 # releasing resources (like database connections) back to the pool.
-_release_capacity_limiter: CapacityLimiter | None = None
-
-
-def get_release_capacity_limiter() -> CapacityLimiter:
-    global _release_capacity_limiter
-    if _release_capacity_limiter is None:
-        _release_capacity_limiter = CapacityLimiter(5)
-    return _release_capacity_limiter
+_release_capacity_limiter: CapacityLimiter = CapacityLimiter(5)
 
 
 # NOTE: a separate function is required only because mypy dislikes trying to add
@@ -45,8 +38,7 @@ async def run_in_release_threadpool(
     separate from the main thread pool to avoid deadlocks.
     """
     func = functools.partial(func, *args, **kwargs)
-    release_limiter = get_release_capacity_limiter()
-    return await anyio.to_thread.run_sync(func, limiter=release_limiter)
+    return await anyio.to_thread.run_sync(func, limiter=_release_capacity_limiter)
 
 
 def set_thread_limit(default_limit: int = 40, release_limit: int = 5) -> None:
@@ -67,7 +59,7 @@ def set_thread_limit(default_limit: int = 40, release_limit: int = 5) -> None:
         raise ValueError("Thread limits must be at least 1.")
 
     anyio.to_thread.current_default_thread_limiter().total_tokens = default_limit
-    get_release_capacity_limiter().total_tokens = release_limit
+    _release_capacity_limiter.total_tokens = release_limit
 
 
 def patch() -> None:
@@ -130,9 +122,4 @@ async def _patched_serialize_response(
         return jsonable_encoder(response_content)
 
 
-__all__ = [
-    "patch",
-    "set_thread_limit",
-    "run_in_release_threadpool",
-    "get_release_capacity_limiter",
-]
+__all__ = ["patch", "set_thread_limit", "run_in_release_threadpool"]
