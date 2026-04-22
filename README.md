@@ -30,7 +30,7 @@ default of 5. You will need to add this to your startup events, or lifetime func
 ```python
 @app.on_event("startup")
 def on_startup():
-    set_thread_limit(default_limit=80, reserve_limit=10)
+    fastapi_overflow.set_thread_limit(default_limit=80, reserve_limit=10)
     ...  # any other setup here
 ```
 
