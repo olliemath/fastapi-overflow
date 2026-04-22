@@ -25,11 +25,13 @@ app = FastAPI()
 
 You can increase the number of threads from the default (40) using the `fastapi_overflow.set_thread_limit` function.
 With a very high number of threads you might also want to increase the reserve used to prevent deadlocks from its
-default of 1. You will need to add this to your startup events, or lifetime function:
+default of 5. You will need to add this to your startup events, or lifetime function:
 
 ```python
 @app.on_event("startup")
 def on_startup():
-    set_thread_limit(limit=..., anti_deadlock_reserve=2)
+    set_thread_limit(default_limit=80, reserve_limit=10)
     ...  # any other setup here
 ```
+
+Some experimentation is needed to find the best numbers for your workload.
