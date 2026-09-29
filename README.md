@@ -28,10 +28,22 @@ With a very high number of threads you might also want to increase the reserve u
 default of 5. You will need to add this to your startup events, or lifetime function:
 
 ```python
-@app.on_event("startup")
-def on_startup():
+import fastapi_overflow
+from fastapi import FastAPI
+from contextlib import asynccontextmanager
+
+fastapi_overflow.patch()  # run this before starting your app
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     fastapi_overflow.set_thread_limit(default_limit=80, reserve_limit=10)
     ...  # any other setup here
+    yield
+    ...  # any other teardown here
+
+
+app = FastAPI(lifespan=lifespan)
 ```
 
 Some experimentation is needed to find the best numbers for your workload.
